@@ -27,6 +27,7 @@ type StatPair struct {
 type ComplexityStat struct {
 	Username string
 	Password string
+	NTHash   string
 	Meets    bool
 }
 
@@ -186,6 +187,7 @@ func Analyze(users []*User, pot map[string]string) *Analysis {
 				a.ComplexityStats = append(a.ComplexityStats, ComplexityStat{
 					Username: u.Username,
 					Password: plain,
+					NTHash:   u.NTHash,
 					Meets:    checkComplexity(plain),
 				})
 			}
@@ -210,6 +212,7 @@ func Analyze(users []*User, pot map[string]string) *Analysis {
 					a.ComplexityStats = append(a.ComplexityStats, ComplexityStat{
 						Username: u.Username,
 						Password: plain,
+						NTHash:   u.NTHash,
 						Meets:    checkComplexity(plain),
 					})
 				}
@@ -246,6 +249,16 @@ func Analyze(users []*User, pot map[string]string) *Analysis {
 	// Sort lengths by count (descending) or by length (ascending)?
 	// Max sorts by count desc.
 	sortStats(a.PasswordLengths)
+
+	// Sort complexity stats by username
+	sort.Slice(a.ComplexityStats, func(i, j int) bool {
+		return a.ComplexityStats[i].Username < a.ComplexityStats[j].Username
+	})
+
+	// Sort username matches password by username
+	sort.Slice(a.UsernameMatchesPassword, func(i, j int) bool {
+		return a.UsernameMatchesPassword[i].Username < a.UsernameMatchesPassword[j].Username
+	})
 
 	return a
 }

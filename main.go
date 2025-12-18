@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -214,19 +215,19 @@ func main() {
 		// mgr.StopProjectContainers(*name) // Optional cleanup on fail
 		log.Fatalf("Failed to start Postgres: %v", err)
 	}
-	defer mgr.StopContainer(psqlID)
+	fmt.Printf("Postgres started (ID: %s)\n", psqlID[:12])
 
 	neo4jID, err := mgr.SpawnNeo4j(*name, workingDir, netName)
 	if err != nil {
 		log.Fatalf("Failed to start Neo4j: %v", err)
 	}
-	defer mgr.StopContainer(neo4jID)
+	fmt.Printf("Neo4j started (ID: %s)\n", neo4jID[:12])
 
 	bhID, err := mgr.SpawnBloodhound(*name, netName, "admin", "admin")
 	if err != nil {
 		log.Fatalf("Failed to start BloodHound: %v", err)
 	}
-	defer mgr.StopContainer(bhID)
+	fmt.Printf("BloodHound started (ID: %s)\n", bhID[:12])
 
 	// Update Password Expiration (1 Year)
 	expirationFunc := func() error {
@@ -385,6 +386,8 @@ func main() {
 						fmt.Printf("Query error [%s]: %v\n", q.Desc, err)
 						continue
 					}
+					// Sort users alphabetically
+					sort.Strings(users)
 					stats.ReportEntries = append(stats.ReportEntries, audit.ReportEntry{
 						Description: q.Desc,
 						Count:       len(users),
@@ -409,12 +412,11 @@ func main() {
 		fmt.Println("Warning: Both -audit-ntds and -audit-cracked are required for auditing.")
 	}
 
-	fmt.Printf("SiloHound is running.\n")
+	fmt.Printf("\nSiloHound is now running in the background.\n")
 	fmt.Printf("URL: http://127.0.0.1:8181\n")
-	fmt.Printf("User: admin\nPass: admin\n")
-	fmt.Print("Press ENTER to stop containers and exit...")
-	bufio.NewScanner(os.Stdin).Scan()
-	fmt.Printf("Shutting down...\n")
+	fmt.Printf("User: admin\nPass: admin\n\n")
+	fmt.Printf("To stop the containers, run:\n")
+	fmt.Printf("  %s -name %s -stop\n", os.Args[0], *name)
 }
 
 func createFolders(base string) {
@@ -423,6 +425,17 @@ func createFolders(base string) {
 }
 
 func injectQueries(mgr *docker.Manager, psqlID string, queries importer.BloodHoundQueries) {
+	// First check if admin user exists
+	checkSQL := "SELECT COUNT(*) FROM users WHERE principal_name = 'admin';"
+	checkCmd := []string{"psql", "-t", "-U", "bloodhound", "-d", "bloodhound", "-c", checkSQL}
+	
+	if err := mgr.Exec(psqlID, checkCmd); err != nil {
+		fmt.Printf("Warning: Unable to check for admin user: %v\n", err)
+		fmt.Println("Note: Queries can only be injected after the admin user is created.")
+		fmt.Println("Please log in to BloodHound UI first, then re-run with the -custom flag.")
+		return
+	}
+	
 	for i, q := range queries.Queries {
 		fmt.Printf("Injecting [%d/%d]: %s\n", i+1, len(queries.Queries), q.Name)
 
@@ -430,7 +443,7 @@ func injectQueries(mgr *docker.Manager, psqlID string, queries importer.BloodHou
 		sQuery := escapeSQL(q.Query)
 		sDesc := escapeSQL(q.Description)
 
-		// SQL to check existence and insert
+		// SQL to insert query
 		sqlQuery := fmt.Sprintf(
 			"INSERT INTO saved_queries (user_id, name, query, description) SELECT (SELECT id FROM users WHERE principal_name = 'admin'), '%s', '%s', '%s' WHERE EXISTS (SELECT 1 FROM users WHERE principal_name = 'admin') AND NOT EXISTS (SELECT 1 FROM saved_queries WHERE name = '%s');",
 			sName, sQuery, sDesc, sName,
@@ -442,6 +455,9 @@ func injectQueries(mgr *docker.Manager, psqlID string, queries importer.BloodHou
 			fmt.Printf("Failed to inject query '%s': %v\n", q.Name, err)
 		}
 	}
+	
+	fmt.Printf("\nQuery injection complete. Processed %d queries.\n", len(queries.Queries))
+	fmt.Println("Note: If queries don't appear in BloodHound, make sure you've logged in to the UI first.")
 }
 
 func escapeSQL(s string) string {

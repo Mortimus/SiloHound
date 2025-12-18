@@ -206,12 +206,14 @@
             <table>
                 <tr>
                     <th>Username</th>
-                    <th>Password</th>
+                    <th>Password (Obfuscated)</th>
+                    <th>NT Hash (Obfuscated)</th>
                 </tr>
                 {{range .Stats.UsernameMatchesPassword}}
                 <tr>
                     <td>{{.Username}}</td>
-                    <td>{{.Plaintext}}</td>
+                    <td>{{.Plaintext | obfuscate}}</td>
+                    <td>{{.NTHash | obfuscateHash}}</td>
                 </tr>
                 {{end}}
             </table>
@@ -238,13 +240,15 @@
             <table>
                 <tr>
                     <th>Username</th>
-                    <th>Password</th>
-                    <th>Meets</th>
+                    <th>Password (Obfuscated)</th>
+                    <th>NT Hash (Obfuscated)</th>
+                    <th>Meets Complexity</th>
                 </tr>
                 {{range .Stats.ComplexityStats}}
                 <tr>
                     <td>{{.Username}}</td>
-                    <td>{{.Password}}</td>
+                    <td>{{.Password | obfuscate}}</td>
+                    <td>{{.NTHash | obfuscateHash}}</td>
                     <td>{{.Meets}}</td>
                 </tr>
                 {{end}}
