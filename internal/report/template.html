@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>SiloHound Password Audit Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 40px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+
+        h1,
+        h2,
+        h3 {
+            color: #2c3e50;
+        }
+
+        h1 {
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            border-left: 5px solid #e74c3c;
+            padding-left: 10px;
+            margin-top: 40px;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+            text-align: center;
+        }
+
+        td.desc {
+            text-align: left;
+            padding-left: 20px;
+        }
+
+        th {
+            background-color: #95a5a6;
+            color: black;
+            border: 1px solid #333;
+        }
+
+        td {
+            border: 1px solid #333;
+        }
+
+        tr:nth-child(even) {
+            background-color: #d1d3d2;
+        }
+
+        .more-info a {
+            color: #2980b9;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .more-info a:hover {
+            text-decoration: underline;
+        }
+
+        /* Details Sections */
+        .details-section {
+            margin-top: 40px;
+            display: none;
+        }
+
+        .details-section:target {
+            display: block;
+        }
+
+        .back-link {
+            display: block;
+            margin-bottom: 15px;
+            color: #7f8c8d;
+            text-decoration: none;
+        }
+    </style>
+    <script>
+        function toggleDetails(id) {
+            var x = document.getElementById(id);
+            if (x.style.display === "none") {
+                x.style.display = "block";
+            } else {
+                x.style.display = "none";
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>SiloHound Audit Report</h1>
+        <p>Generated on {{.Date}}</p>
+
+        <!-- Main Summary Table -->
+        <table>
+            <tr>
+                <th style="width: 100px;">Count</th>
+                <th>Description</th>
+                <th style="width: 100px;">More Info</th>
+            </tr>
+
+            <!-- Standard Stats -->
+            <tr>
+                <td>{{.Stats.TotalUsers}}</td>
+                <td class="desc">Password Hashes</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>{{.Stats.UniqueHashes}}</td>
+                <td class="desc">Unique Password Hashes</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>{{.Stats.CrackedUsers}}</td>
+                <td class="desc">Passwords Discovered Through Cracking</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>{{printf "%.2f" .Stats.CrackedPercentage}}</td>
+                <td class="desc">Percent of Passwords Cracked</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>{{printf "%.2f" .Stats.UniqueCrackedPercentage}}</td>
+                <td class="desc">Percent of Unique Passwords Cracked</td>
+                <td></td>
+            </tr>
+
+            <tr>
+                <td>{{.Stats.LMHashCount}}</td>
+                <td class="desc">LM Hashes (Non-Blank)</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>{{.Stats.LMHashUnique}}</td>
+                <td class="desc">Unique LM Hashes (Non-Blank)</td>
+                <td></td>
+            </tr>
+
+            <tr>
+                <td>{{len .Stats.UsernameMatchesPassword}}</td>
+                <td class="desc">Users with Username Matching Password</td>
+                <td class="more-info">{{if .Stats.UsernameMatchesPassword}}<a
+                        href="javascript:toggleDetails('details-username-match')">Details</a>{{end}}</td>
+            </tr>
+
+            <tr>
+                <td>{{len .Stats.PasswordLengths}}</td>
+                <td class="desc">Password Length Stats</td>
+                <td class="more-info"><a href="javascript:toggleDetails('details-lengths')">Details</a></td>
+            </tr>
+            <tr>
+                <td>{{len .Stats.ComplexityStats}}</td>
+                <td class="desc">Password Complexity Stats</td>
+                <td class="more-info"><a href="javascript:toggleDetails('details-complexity')">Details</a></td>
+            </tr>
+            <tr>
+                <td>{{len .Stats.PasswordReuse}}</td>
+                <td class="desc">Password Reuse Stats</td>
+                <td class="more-info"><a href="javascript:toggleDetails('details-reuse')">Details</a></td>
+            </tr>
+
+            <!-- Graph Stats -->
+            {{range $index, $entry := .Stats.ReportEntries}}
+            <tr>
+                <td>{{.Count}}</td>
+                <td class="desc">{{.Description}}</td>
+                <td class="more-info">
+                    {{if eq .Description "Groups Cracked by Percentage"}}
+                    <a href="javascript:toggleDetails('details-groups-pct')">Details</a>
+                    {{else if .HasDetails}}
+                    <a href="javascript:toggleDetails('details-graph-{{$index}}')">Details</a>
+                    {{end}}
+                </td>
+            </tr>
+            {{end}}
+        </table>
+
+        <!-- Details Sections -->
+
+        <div id="details-username-match" style="display:none; margin-top:20px;">
+            <h3>Users with Username Matching Password</h3>
+            <table>
+                <tr>
+                    <th>Username</th>
+                    <th>Password</th>
+                </tr>
+                {{range .Stats.UsernameMatchesPassword}}
+                <tr>
+                    <td>{{.Username}}</td>
+                    <td>{{.Plaintext}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div id="details-lengths" style="display:none; margin-top:20px;">
+            <h3>Password Length Stats</h3>
+            <table>
+                <tr>
+                    <th>Length</th>
+                    <th>Count</th>
+                </tr>
+                {{range .Stats.PasswordLengths}}
+                <tr>
+                    <td>{{.Key}}</td>
+                    <td>{{.Value}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div id="details-complexity" style="display:none; margin-top:20px;">
+            <h3>Password Complexity</h3>
+            <table>
+                <tr>
+                    <th>Username</th>
+                    <th>Password</th>
+                    <th>Meets</th>
+                </tr>
+                {{range .Stats.ComplexityStats}}
+                <tr>
+                    <td>{{.Username}}</td>
+                    <td>{{.Password}}</td>
+                    <td>{{.Meets}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div id="details-reuse" style="display:none; margin-top:20px;">
+            <h3>Password Reuse</h3>
+            <table>
+                <tr>
+                    <th>Password</th>
+                    <th>Count</th>
+                </tr>
+                {{range .Stats.PasswordReuse}}
+                <tr>
+                    <td>{{.Key | obfuscate}}</td>
+                    <td>{{.Value}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        <div id="details-groups-pct" style="display:none; margin-top:20px;">
+            <h3>Groups Cracked by Percentage</h3>
+            <table>
+                <tr>
+                    <th>Group Name</th>
+                    <th>Cracked Count</th>
+                    <th>Total Members</th>
+                    <th>Percentage</th>
+                </tr>
+                {{range .Stats.GroupsByPercentage}}
+                <tr>
+                    <td>{{.GroupName}}</td>
+                    <td>{{.Count}}</td>
+                    <td>{{.TotalMembers}}</td>
+                    <td>{{printf "%.1f" .Percent}}%</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+
+        {{range $index, $entry := .Stats.ReportEntries}}
+        <div id="details-graph-{{$index}}" style="display:none; margin-top:20px;">
+            <h3>{{.Description}}</h3>
+            <ul>
+                {{range .Users}}
+                <li>{{.}}</li>
+                {{end}}
+            </ul>
+        </div>
+        {{end}}
+
+        <div class="footer" style="margin-top:50px; text-align:center; color:#777;">
+            Generated by SiloHound
+        </div>
+    </div>
+</body>
+
+</html>
