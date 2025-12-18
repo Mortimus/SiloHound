@@ -425,12 +425,14 @@ func createFolders(base string) {
 }
 
 func injectQueries(mgr *docker.Manager, psqlID string, queries importer.BloodHoundQueries) {
-	// First check if admin user exists
+	// Check database connectivity. Note: We can't easily capture the query result
+	// to verify the admin user exists, but the INSERT queries below have WHERE EXISTS
+	// clauses that will prevent insertion if the admin user doesn't exist.
 	checkSQL := "SELECT COUNT(*) FROM users WHERE principal_name = 'admin';"
 	checkCmd := []string{"psql", "-t", "-U", "bloodhound", "-d", "bloodhound", "-c", checkSQL}
 	
 	if err := mgr.Exec(psqlID, checkCmd); err != nil {
-		fmt.Printf("Warning: Unable to check for admin user: %v\n", err)
+		fmt.Printf("Warning: Unable to connect to database: %v\n", err)
 		fmt.Println("Note: Queries can only be injected after the admin user is created.")
 		fmt.Println("Please log in to BloodHound UI first, then re-run with the -custom flag.")
 		return

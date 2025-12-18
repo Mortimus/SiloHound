@@ -27,7 +27,7 @@ type StatPair struct {
 type ComplexityStat struct {
 	Username string
 	Password string
-	NTHash   string
+	NTHash   string // NT hash of the password (obfuscated in reports)
 	Meets    bool
 }
 
