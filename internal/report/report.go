@@ -37,6 +37,12 @@ func Generate(path string, stats *audit.Analysis, customTemplatePath string) err
 			}
 			return s[:1] + "***" + s[len(s)-1:]
 		},
+		"obfuscateHash": func(s string) string {
+			if len(s) <= 8 {
+				return "********"
+			}
+			return s[:4] + "********" + s[len(s)-4:]
+		},
 	}
 
 	t, err := template.New("report").Funcs(funcMap).Parse(tmplContent)
