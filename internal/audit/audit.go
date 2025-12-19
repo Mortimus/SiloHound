@@ -49,6 +49,7 @@ type Analysis struct {
 	TopPasswords            []StatPair
 	PasswordLengths         []StatPair // Length -> Count
 	PasswordReuse           []StatPair // Password -> Count
+	TopBaseWords            []StatPair // BaseWord -> Count
 	ComplexityStats         []ComplexityStat
 	ExposedCreds            []*User     // Users with cracked passwords
 	GroupStats              []GroupStat // From Neo4j
@@ -151,6 +152,7 @@ func Analyze(users []*User, pot map[string]string) *Analysis {
 	uniqueHashes := make(map[string]bool)
 	uniqueCrackedHashes := make(map[string]bool)
 	passCounts := make(map[string]int)
+	baseWordCounts := make(map[string]int)
 	lengthCounts := make(map[int]int)
 
 	// Max Parity collections
@@ -183,13 +185,18 @@ func Analyze(users []*User, pot map[string]string) *Analysis {
 				passCounts[plain]++
 				lengthCounts[len(plain)]++
 
-				// Complexity
 				a.ComplexityStats = append(a.ComplexityStats, ComplexityStat{
 					Username: u.Username,
 					Password: plain,
 					NTHash:   u.NTHash,
 					Meets:    checkComplexity(plain),
 				})
+
+				// Base Word Analysis
+				base := extractBaseWord(plain)
+				if base != "" {
+					baseWordCounts[base]++
+				}
 			}
 		} else if u.LMHash != "" && u.LMHash != "aad3b435b51404eeaad3b435b51404ee" {
 			// Try LM
@@ -215,6 +222,12 @@ func Analyze(users []*User, pot map[string]string) *Analysis {
 						NTHash:   u.NTHash,
 						Meets:    checkComplexity(plain),
 					})
+
+					// Base Word Analysis
+					base := extractBaseWord(plain)
+					if base != "" {
+						baseWordCounts[base]++
+					}
 				}
 			}
 		}
@@ -249,6 +262,14 @@ func Analyze(users []*User, pot map[string]string) *Analysis {
 	// Sort lengths by count (descending) or by length (ascending)?
 	// Max sorts by count desc.
 	sortStats(a.PasswordLengths)
+
+	// Top Base Words
+	for w, c := range baseWordCounts {
+		if c > 1 {
+			a.TopBaseWords = append(a.TopBaseWords, StatPair{Key: w, Value: c})
+		}
+	}
+	sortStats(a.TopBaseWords)
 
 	// Sort complexity stats by username
 	sort.Slice(a.ComplexityStats, func(i, j int) bool {
@@ -309,4 +330,42 @@ func sortStats(s []StatPair) {
 	sort.Slice(s, func(i, j int) bool {
 		return s[i].Value > s[j].Value
 	})
+}
+
+func extractBaseWord(s string) string {
+	// Simple heuristic: remove trailing digits and special chars
+	// Keep text
+	// This is a naive implementation matching basic DPAT logic
+	runes := []rune(s)
+	end := len(runes)
+	for end > 0 {
+		r := runes[end-1]
+		if unicode.IsDigit(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			end--
+		} else {
+			break
+		}
+	}
+	// Start trim? Usually we care about the "Root" word.
+	// Max DPAT often just regex replaces [\d\W] with empty? No, that destroys structure.
+	// Often it's strip digits/specials from end.
+
+	base := string(runes[:end])
+
+	// Also strip leading digits/specials?
+	// e.g. !Pass123 -> Pass
+	start := 0
+	runes = []rune(base) // re-rune
+	for start < len(runes) {
+		r := runes[start]
+		if unicode.IsDigit(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			start++
+		} else {
+			break
+		}
+	}
+	if start >= len(runes) {
+		return ""
+	}
+	return strings.ToLower(string(runes[start:]))
 }

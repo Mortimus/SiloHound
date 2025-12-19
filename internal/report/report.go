@@ -14,9 +14,10 @@ import (
 var defaultTemplate string
 
 type ReportData struct {
-	Date     string
-	Stats    *audit.Analysis
-	TopReuse []audit.StatPair
+	Date         string
+	Stats        *audit.Analysis
+	TopReuse     []audit.StatPair
+	TopBaseWords []audit.StatPair
 }
 
 func Generate(path string, stats *audit.Analysis, customTemplatePath string) error {
@@ -38,10 +39,7 @@ func Generate(path string, stats *audit.Analysis, customTemplatePath string) err
 			return s[:1] + "***" + s[len(s)-1:]
 		},
 		"obfuscateHash": func(s string) string {
-			if len(s) <= 8 {
-				return "********"
-			}
-			return s[:4] + "********" + s[len(s)-4:]
+			return "********************************"
 		},
 	}
 
@@ -62,10 +60,17 @@ func Generate(path string, stats *audit.Analysis, customTemplatePath string) err
 		topReuse = topReuse[:10]
 	}
 
+	// Limit TopBaseWords to 10
+	topBase := stats.TopBaseWords
+	if len(topBase) > 10 {
+		topBase = topBase[:10]
+	}
+
 	data := ReportData{
-		Date:     time.Now().Format("2006-01-02 15:04:05"),
-		Stats:    stats,
-		TopReuse: topReuse,
+		Date:         time.Now().Format("2006-01-02 15:04:05"),
+		Stats:        stats,
+		TopReuse:     topReuse,
+		TopBaseWords: topBase,
 	}
 
 	return t.Execute(f, data)

@@ -72,6 +72,22 @@ func (m *Manager) PullImage(imageName string) error {
 	return nil
 }
 
+func (m *Manager) ImageExists(imageName string) (bool, error) {
+	images, err := m.cli.ImageList(m.ctx, image.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			if tag == imageName {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error) {
 	mountPath := filepath.Join(wd, PSQLFOLDER)
 	containerName := fmt.Sprintf("SiloHound_%s_PSQL", projectName)
@@ -102,6 +118,52 @@ func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error)
 	}
 
 	return m.runContainer(containerName, config, hostConfig, networkingConfig, PSQL_SUCC_START)
+}
+
+func (m *Manager) FixPermissions(hostPath string, uid, gid int) error {
+	// Use Postgres image as a 'toolbox' since we expect it to be present for the project
+	// Mount hostPath to /data and chown it.
+
+	// Config
+	config := &container.Config{
+		Image: POSTGRESQL,
+		User:  "root", // Run as root to choke permissions
+		Cmd:   []string{"chown", "-R", fmt.Sprintf("%d:%d", uid, gid), "/data"},
+	}
+
+	// Host Config
+	hostConfig := &container.HostConfig{
+		Mounts: []mount.Mount{
+			{
+				Type:   mount.TypeBind,
+				Source: hostPath,
+				Target: "/data",
+			},
+		},
+		AutoRemove: true,
+	}
+
+	resp, err := m.cli.ContainerCreate(m.ctx, config, hostConfig, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("failed to create permission fixer container: %w", err)
+	}
+
+	if err := m.cli.ContainerStart(m.ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("failed to start permission fixer container: %w", err)
+	}
+
+	// Wait for it to finish
+	statusCh, errCh := m.cli.ContainerWait(m.ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("error waiting for fixer: %w", err)
+		}
+	case <-statusCh:
+		// Done
+	}
+
+	return nil
 }
 
 func (m *Manager) SpawnNeo4j(projectName, wd, netName string) (string, error) {

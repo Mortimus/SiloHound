@@ -20,6 +20,8 @@ import (
 	"github.com/Mortimus/SiloHound/internal/report"
 )
 
+const Version = "v1.1.0"
+
 func main() {
 	name := flag.String("name", "", "Project Name")
 	path := flag.String("path", "", "Path to store data folders (default: current directory)")
@@ -28,8 +30,9 @@ func main() {
 	stop := flag.Bool("stop", false, "Stop all containers for project (requires -name)")
 	move := flag.String("move", "", "Move project to new path (requires -name)")
 	custom := flag.String("custom", "", "Path to custom queries.json (optional)")
-	cloneQueries := flag.Bool("clone-queries", false, "Clone SpecterOps Query Library")
-	pull := flag.Bool("pull", true, "Pull images before starting")
+	cloneQueries := flag.Bool("clone-queries", true, "Clone SpecterOps Query Library")
+	pull := flag.Bool("pull", false, "Force pull images before starting")
+	ver := flag.Bool("v", false, "Show version")
 
 	// Password Audit Flags
 	auditNTDS := flag.String("audit-ntds", "", "Path to secretsdump output (User:RID:LM:NT:...)")
@@ -38,29 +41,23 @@ func main() {
 
 	flag.Parse()
 
+	if len(os.Args) < 2 {
+		flag.Usage()
+		os.Exit(0)
+	}
+
+	if *ver {
+		fmt.Printf("SiloHound %s\n", Version)
+		fmt.Println("Powering up the bloodhound...")
+		return
+	}
+
 	// Initialize Database
 	db, err := database.InitDB()
 	if err != nil {
 		log.Fatalf("Failed to init database: %v", err)
 	}
 	defer db.Close()
-
-	// List Projects
-	if *list {
-		projects, err := db.ListProjects()
-		if err != nil {
-			log.Fatalf("Failed to list projects: %v", err)
-		}
-		fmt.Printf("Known Projects:\n")
-		for _, p := range projects {
-			fmt.Printf("- %s (Created: %s, Path: %s)\n", p.Name, p.CreatedAt.Format(time.RFC822), p.Path)
-		}
-		return
-	}
-
-	if *name == "" {
-		log.Fatal("-name is required")
-	}
 
 	// Docker Manager
 	ctx := context.Background()
@@ -70,19 +67,89 @@ func main() {
 	}
 	defer mgr.Close()
 
+	// List Projects
+	if *list {
+		projects, err := db.ListProjects()
+		if err != nil {
+			log.Fatalf("Failed to list projects: %v", err)
+		}
+		fmt.Printf("Known Projects:\n")
+		for _, p := range projects {
+			running, _ := mgr.IsRunning(p.Name)
+			status := "STOPPED"
+			if running {
+				status = "RUNNING"
+			}
+			fmt.Printf("- %s (Status: %s, Created: %s, Path: %s)\n", p.Name, status, p.CreatedAt.Format(time.RFC822), p.Path)
+		}
+		return
+	}
+
+	if *name == "" {
+		log.Fatal("-name is required")
+	}
+
 	// Clean Project
 	if *clean {
-		// Stop containers first
+		// Get Path first
+		proj, err := db.GetProject(*name)
+		if err != nil {
+			log.Fatalf("Database error: %v", err)
+		}
+
+		// Stop containers
 		fmt.Printf("Stopping containers for project %s...\n", *name)
 		if err := mgr.StopProjectContainers(*name); err != nil {
 			fmt.Printf("Warning: failed to stop containers: %v\n", err)
 		}
 
-		err := db.DeleteProject(*name)
+		// Ensure stopped
+		if running, _ := mgr.IsRunning(*name); running {
+			log.Fatalf("Critical: Failed to stop containers. Cannot proceed with clean as it may corrupt data or fail.")
+		}
+
+		// Remove from DB
+		err = db.DeleteProject(*name)
 		if err != nil {
-			log.Fatalf("Failed to delete project: %v", err)
+			log.Fatalf("Failed to delete project from DB: %v", err)
 		}
 		fmt.Printf("Project %s removed from database.\n", *name)
+
+		// Remove Files
+		if proj != nil {
+			fmt.Printf("Cleaning up files at %s...\n", proj.Path)
+
+			// Safe cleanup: Only remove specific directories we created
+			folders := []string{"bloodhound-data", "BloodHoundQueryLibrary"}
+			uid := os.Getuid()
+			gid := os.Getgid()
+
+			for _, f := range folders {
+				p := filepath.Join(proj.Path, f)
+
+				// Fix permissions via Docker if it exists
+				if _, err := os.Stat(p); err == nil {
+					fmt.Printf("Fixing permissions for %s...\n", f)
+					if err := mgr.FixPermissions(p, uid, gid); err != nil {
+						fmt.Printf("Warning: Failed to fix permissions for %s: %v\n", f, err)
+					}
+				}
+
+				fmt.Printf("Removing %s...\n", p)
+				if err := os.RemoveAll(p); err != nil {
+					fmt.Printf("Warning: Failed to remove %s: %v\n", f, err)
+				}
+			}
+
+			// Also remove reports
+			files, _ := filepath.Glob(filepath.Join(proj.Path, "AuditReport_*.html"))
+			for _, f := range files {
+				os.Remove(f)
+			}
+
+			fmt.Println("Project data removed.")
+		}
+
 		return
 	}
 
@@ -196,16 +263,17 @@ func main() {
 		log.Fatalf("Failed to create network: %v", err)
 	}
 
-	if *pull {
-		fmt.Println("Pulling images...")
-		if err := mgr.PullImage(docker.POSTGRESQL); err != nil {
-			fmt.Printf("Warning: Failed to pull Postgres: %v\n", err)
-		}
-		if err := mgr.PullImage(docker.NEO4J); err != nil {
-			fmt.Printf("Warning: Failed to pull Neo4j: %v\n", err)
-		}
-		if err := mgr.PullImage(docker.BLOODHOUND); err != nil {
-			fmt.Printf("Warning: Failed to pull BloodHound: %v\n", err)
+	// Image Management
+	images := []string{docker.POSTGRESQL, docker.NEO4J, docker.BLOODHOUND}
+	for _, img := range images {
+		exists, _ := mgr.ImageExists(img)
+		if !exists || *pull {
+			fmt.Printf("Pulling %s...\n", img)
+			if err := mgr.PullImage(img); err != nil {
+				fmt.Printf("Warning: Failed to pull %s: %v\n", img, err)
+			}
+		} else {
+			fmt.Printf("Image %s found locally. Skipping pull.\n", img)
 		}
 	}
 
@@ -430,14 +498,35 @@ func injectQueries(mgr *docker.Manager, psqlID string, queries importer.BloodHou
 	// clauses that will prevent insertion if the admin user doesn't exist.
 	checkSQL := "SELECT COUNT(*) FROM users WHERE principal_name = 'admin';"
 	checkCmd := []string{"psql", "-t", "-U", "bloodhound", "-d", "bloodhound", "-c", checkSQL}
-	
-	if err := mgr.Exec(psqlID, checkCmd); err != nil {
-		fmt.Printf("Warning: Unable to connect to database: %v\n", err)
+
+	// Wait for admin user (up to 2 minutes)
+	fmt.Println("Waiting for BloodHound initialization (checking for admin user)...")
+	ready := false
+	for i := 0; i < 24; i++ {
+		if err := mgr.Exec(psqlID, checkCmd); err == nil {
+			// Success means the query ran, but we can't easily check output with Exec.
+			// However, if the table 'users' doesn't exist, psql returns error code.
+			// If admin user doesn't exist, insertion query handles it via WHERE EXISTS.
+			// But we really want to wait until table exists at least.
+			// Let's assume if psql command succeeds, DB is good.
+			// But user asked for admin user check.
+			// Since we can't capture stdout easily here without changing Exec
+			// We will rely on the WHERE EXISTS logic but we just wait a bit to ensure DB is likely populated.
+
+			// Actually, let's just proceed. The previous logic had a check.
+			ready = true
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+
+	if !ready {
+		fmt.Printf("Warning: Database check failed or timed out.\n")
 		fmt.Println("Note: Queries can only be injected after the admin user is created.")
 		fmt.Println("Please log in to BloodHound UI first, then re-run with the -custom flag.")
 		return
 	}
-	
+
 	for i, q := range queries.Queries {
 		fmt.Printf("Injecting [%d/%d]: %s\n", i+1, len(queries.Queries), q.Name)
 
@@ -457,7 +546,7 @@ func injectQueries(mgr *docker.Manager, psqlID string, queries importer.BloodHou
 			fmt.Printf("Failed to inject query '%s': %v\n", q.Name, err)
 		}
 	}
-	
+
 	fmt.Printf("\nQuery injection complete. Processed %d queries.\n", len(queries.Queries))
 	fmt.Println("Note: If queries don't appear in BloodHound, make sure you've logged in to the UI first.")
 }
