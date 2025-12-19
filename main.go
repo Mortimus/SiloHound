@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -20,7 +21,35 @@ import (
 	"github.com/Mortimus/SiloHound/internal/report"
 )
 
-const Version = "v1.1.0"
+var (
+	Version = "v1.1.0"
+	Commit  = ""
+	Date    = ""
+)
+
+func getBuildInfo() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				if Commit == "" {
+					Commit = setting.Value
+					if len(Commit) > 7 {
+						Commit = Commit[:7]
+					}
+				}
+			case "vcs.time":
+				if Date == "" {
+					Date = setting.Value
+				}
+			case "vcs.modified":
+				if setting.Value == "true" {
+					Commit += "-dirty"
+				}
+			}
+		}
+	}
+}
 
 func main() {
 	name := flag.String("name", "", "Project Name")
@@ -47,7 +76,17 @@ func main() {
 	}
 
 	if *ver {
-		fmt.Printf("SiloHound %s\n", Version)
+		getBuildInfo()
+
+		vStr := Version
+		if Commit != "" {
+			vStr += fmt.Sprintf(" (%s)", Commit)
+		}
+		if Date != "" {
+			vStr += fmt.Sprintf(" built on %s", Date)
+		}
+
+		fmt.Printf("SiloHound %s\n", vStr)
 		fmt.Println("Powering up the bloodhound...")
 		return
 	}
