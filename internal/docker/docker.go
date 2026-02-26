@@ -124,14 +124,12 @@ func (m *Manager) FixPermissions(hostPath string, uid, gid int) error {
 	// Use Postgres image as a 'toolbox' since we expect it to be present for the project
 	// Mount hostPath to /data and chown it.
 
-	// Config
 	config := &container.Config{
 		Image: POSTGRESQL,
 		User:  "root", // Run as root to choke permissions
 		Cmd:   []string{"chown", "-R", fmt.Sprintf("%d:%d", uid, gid), "/data"},
 	}
 
-	// Host Config
 	hostConfig := &container.HostConfig{
 		Mounts: []mount.Mount{
 			{
@@ -152,7 +150,6 @@ func (m *Manager) FixPermissions(hostPath string, uid, gid int) error {
 		return fmt.Errorf("failed to start permission fixer container: %w", err)
 	}
 
-	// Wait for it to finish
 	statusCh, errCh := m.cli.ContainerWait(m.ctx, resp.ID, container.WaitConditionNotRunning)
 	select {
 	case err := <-errCh:
@@ -166,20 +163,29 @@ func (m *Manager) FixPermissions(hostPath string, uid, gid int) error {
 	return nil
 }
 
-func (m *Manager) SpawnNeo4j(projectName, wd, netName string) (string, error) {
+// Updated signature: added heapSize string
+func (m *Manager) SpawnNeo4j(projectName, wd, netName, heapSize string) (string, error) {
 	mountPath := filepath.Join(wd, NEO4JFOLDER)
 	containerName := fmt.Sprintf("SiloHound_%s_Neo4j", projectName)
 
+	env := []string{
+		"NEO4J_AUTH=neo4j/bloodhoundcommunityedition",
+		"NEO4J_labs_plugins=[\"apoc\"]",
+		"NEO4J_apoc_export_file_enabled=true",
+		"NEO4J_apoc_import_file_enabled=true",
+		"NEO4J_apoc_import_file_use__neo4j__config=false",
+		"NEO4J_dbms_security_procedures_unrestricted=apoc.*",
+	}
+
+	// Inject heap size if provided
+	if heapSize != "" {
+		env = append(env, fmt.Sprintf("NEO4J_dbms_memory_heap_initial__size=%s", heapSize))
+		env = append(env, fmt.Sprintf("NEO4J_dbms_memory_heap_max__size=%s", heapSize))
+	}
+
 	config := &container.Config{
 		Image: NEO4J,
-		Env: []string{
-			"NEO4J_AUTH=neo4j/bloodhoundcommunityedition",
-			"NEO4J_labs_plugins=[\"apoc\"]",
-			"NEO4J_apoc_export_file_enabled=true",
-			"NEO4J_apoc_import_file_enabled=true",
-			"NEO4J_apoc_import_file_use__neo4j__config=false",
-			"NEO4J_dbms_security_procedures_unrestricted=apoc.*",
-		},
+		Env:   env,
 		ExposedPorts: nat.PortSet{
 			"7474/tcp": struct{}{},
 			"7687/tcp": struct{}{},
@@ -250,7 +256,6 @@ func (m *Manager) stopContainersByPrefix(prefix string) error {
 
 	for _, c := range containers {
 		for _, n := range c.Names {
-			// Container names from API start with /
 			name := strings.TrimPrefix(n, "/")
 			if strings.HasPrefix(name, prefix) {
 				fmt.Printf("Stopping container %s...\n", name)
@@ -265,7 +270,7 @@ func (m *Manager) stopContainersByPrefix(prefix string) error {
 
 func (m *Manager) IsRunning(projectName string) (bool, error) {
 	prefix := fmt.Sprintf("SiloHound_%s_", projectName)
-	containers, err := m.cli.ContainerList(m.ctx, container.ListOptions{}) // Only running
+	containers, err := m.cli.ContainerList(m.ctx, container.ListOptions{})
 	if err != nil {
 		return false, err
 	}
@@ -280,7 +285,6 @@ func (m *Manager) IsRunning(projectName string) (bool, error) {
 }
 
 func (m *Manager) runContainer(name string, config *container.Config, hostConfig *container.HostConfig, netConfig *network.NetworkingConfig, successLog string) (string, error) {
-	// cleanup existing
 	m.StopContainer(name)
 
 	resp, err := m.cli.ContainerCreate(m.ctx, config, hostConfig, netConfig, nil, name)
@@ -301,7 +305,6 @@ func (m *Manager) runContainer(name string, config *container.Config, hostConfig
 }
 
 func (m *Manager) StopContainer(nameOrID string) error {
-	// Try to find container by name or ID
 	containers, err := m.cli.ContainerList(m.ctx, container.ListOptions{All: true})
 	if err != nil {
 		return err
@@ -310,8 +313,7 @@ func (m *Manager) StopContainer(nameOrID string) error {
 	for _, c := range containers {
 		for _, n := range c.Names {
 			if strings.TrimPrefix(n, "/") == nameOrID || c.ID == nameOrID {
-				// Stop it
-				timeout := 10 // seconds
+				timeout := 10
 				m.cli.ContainerStop(m.ctx, c.ID, container.StopOptions{Timeout: &timeout})
 				m.cli.ContainerRemove(m.ctx, c.ID, container.RemoveOptions{Force: true})
 				return nil
