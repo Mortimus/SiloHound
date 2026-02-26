@@ -63,6 +63,9 @@ func main() {
 	pull := flag.Bool("pull", false, "Force pull images before starting")
 	ver := flag.Bool("v", false, "Show version")
 
+	// Add neo4j memory flag with 2G baseline (good default for AD imports)
+	neo4jHeap := flag.String("neo4j-heap", "2G", "Maximum JVM heap size for Neo4j (e.g., 2G, 4G, 8G)")
+
 	// Password Audit Flags
 	auditNTDS := flag.String("audit-ntds", "", "Path to secretsdump output (User:RID:LM:NT:...)")
 	auditCracked := flag.String("audit-cracked", "", "Path to cracked hashes (hash:plain)")
@@ -324,11 +327,11 @@ func main() {
 	}
 	fmt.Printf("Postgres started (ID: %s)\n", psqlID[:12])
 
-	neo4jID, err := mgr.SpawnNeo4j(*name, workingDir, netName)
+	neo4jID, err := mgr.SpawnNeo4j(*name, workingDir, netName, *neo4jHeap)
 	if err != nil {
 		log.Fatalf("Failed to start Neo4j: %v", err)
 	}
-	fmt.Printf("Neo4j started (ID: %s)\n", neo4jID[:12])
+	fmt.Printf("Neo4j started (ID: %s) with heap size %s\n", neo4jID[:12], *neo4jHeap)
 
 	bhID, err := mgr.SpawnBloodhound(*name, netName, "admin", "admin")
 	if err != nil {
