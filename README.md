@@ -61,6 +61,9 @@ silohound -list
 # Stop containers for a specific project
 silohound -name "Assessment2025" -stop
 
+# Start with verbose container diagnostics
+silohound -name "Assessment2025" -debug
+
 # Remove a project (stops containers and removes from DB)
 silohound -clean -name "Assessment2025"
 
@@ -98,6 +101,14 @@ silohound -name "Assessment2025" -clone-queries
 *   **Database**: Projects are tracked in `~/.silohound/projects.db` (SQLite).
 *   **Project Data**: Each project creates a `bloodhound-data` folder in its specified path containing `postgresql` and `neo4j` subdirectories.
 *   **Logs**: Containers stream logs to stdout/stderr.
+
+## Troubleshooting Startup
+
+If a project does not come up successfully, run with `-debug` to print detailed Docker pull output, container state, and recent logs:
+
+```bash
+silohound -name "Assessment2025" -debug
+```
 
 ## License
 MIT

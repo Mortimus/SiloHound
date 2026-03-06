@@ -1,17 +1,22 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -27,16 +32,17 @@ const (
 )
 
 type Manager struct {
-	cli *client.Client
-	ctx context.Context
+	cli   *client.Client
+	ctx   context.Context
+	debug bool
 }
 
-func NewManager(ctx context.Context) (*Manager, error) {
+func NewManager(ctx context.Context, debug bool) (*Manager, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{cli: cli, ctx: ctx}, nil
+	return &Manager{cli: cli, ctx: ctx, debug: debug}, nil
 }
 
 func (m *Manager) Close() error {
@@ -68,7 +74,13 @@ func (m *Manager) PullImage(imageName string) error {
 		return err
 	}
 	defer reader.Close()
-	io.Copy(io.Discard, reader)
+
+	if m.debug {
+		_, _ = io.Copy(os.Stdout, reader)
+		return nil
+	}
+
+	_, _ = io.Copy(io.Discard, reader)
 	return nil
 }
 
@@ -286,6 +298,7 @@ func (m *Manager) IsRunning(projectName string) (bool, error) {
 
 func (m *Manager) runContainer(name string, config *container.Config, hostConfig *container.HostConfig, netConfig *network.NetworkingConfig, successLog string) (string, error) {
 	m.StopContainer(name)
+	m.debugf("creating container %s using image %s", name, config.Image)
 
 	resp, err := m.cli.ContainerCreate(m.ctx, config, hostConfig, netConfig, nil, name)
 	if err != nil {
@@ -299,7 +312,8 @@ func (m *Manager) runContainer(name string, config *container.Config, hostConfig
 	fmt.Printf("Started %s (%s). Waiting for readiness...\n", name, resp.ID[:12])
 
 	if err := m.WaitUntilReady(resp.ID, successLog); err != nil {
-		return "", fmt.Errorf("container %s failed to become ready: %v", name, err)
+		_ = m.printContainerDiagnostics(name, resp.ID)
+		return "", fmt.Errorf("container %s failed to become ready: %w", name, err)
 	}
 	return resp.ID, nil
 }
@@ -324,29 +338,41 @@ func (m *Manager) StopContainer(nameOrID string) error {
 }
 
 func (m *Manager) WaitUntilReady(containerID, successLog string) error {
-	out, err := m.cli.ContainerLogs(m.ctx, containerID, container.LogsOptions{ShowStdout: true, ShowStderr: true, Follow: true})
-	if err != nil {
-		return err
-	}
-	defer out.Close()
+	const timeout = 3 * time.Minute
+	deadline := time.Now().Add(timeout)
 
-	buf := make([]byte, 1024)
-	for {
-		n, err := out.Read(buf)
-		if n > 0 {
-			chunk := string(buf[:n])
-			if strings.Contains(chunk, successLog) {
-				return nil
-			}
+	for time.Now().Before(deadline) {
+		logs, logErr := m.getContainerLogs(containerID, 300)
+		if logErr == nil && successLog != "" && strings.Contains(logs, successLog) {
+			m.debugf("container %s emitted readiness signal %q", containerID[:12], successLog)
+			return nil
 		}
+
+		inspect, err := m.cli.ContainerInspect(m.ctx, containerID)
 		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return err
+			return fmt.Errorf("inspect failed while waiting for readiness: %w", err)
 		}
+
+		if inspect.State != nil {
+			if !inspect.State.Running {
+				return fmt.Errorf("container exited before ready (status=%s, exitCode=%d, error=%s)", inspect.State.Status, inspect.State.ExitCode, inspect.State.Error)
+			}
+
+			if inspect.State.Health != nil {
+				switch inspect.State.Health.Status {
+				case "healthy":
+					m.debugf("container %s reported healthy", containerID[:12])
+					return nil
+				case "unhealthy":
+					return fmt.Errorf("container reported unhealthy")
+				}
+			}
+		}
+
+		time.Sleep(2 * time.Second)
 	}
-	return nil
+
+	return fmt.Errorf("timed out after %s waiting for readiness marker %q", timeout, successLog)
 }
 
 func (m *Manager) Exec(containerID string, cmd []string) error {
@@ -366,5 +392,110 @@ func (m *Manager) Exec(containerID string, cmd []string) error {
 		return err
 	}
 
+	for {
+		inspect, err := m.cli.ContainerExecInspect(m.ctx, resp.ID)
+		if err != nil {
+			return err
+		}
+		if !inspect.Running {
+			if inspect.ExitCode != 0 {
+				return fmt.Errorf("exec failed with exit code %d: %s", inspect.ExitCode, strings.Join(cmd, " "))
+			}
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
 	return nil
+}
+
+func (m *Manager) PrintProjectDiagnostics(projectName string) error {
+	prefix := fmt.Sprintf("SiloHound_%s_", projectName)
+	containers, err := m.cli.ContainerList(m.ctx, container.ListOptions{All: true})
+	if err != nil {
+		return err
+	}
+
+	targets := make([]container.Summary, 0)
+	for _, c := range containers {
+		for _, n := range c.Names {
+			name := strings.TrimPrefix(n, "/")
+			if strings.HasPrefix(name, prefix) {
+				targets = append(targets, c)
+				break
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		fmt.Printf("[DEBUG] no containers found for prefix %s\n", prefix)
+		return nil
+	}
+
+	sort.Slice(targets, func(i, j int) bool { return targets[i].Created < targets[j].Created })
+	for _, c := range targets {
+		name := strings.TrimPrefix(c.Names[0], "/")
+		if err := m.printContainerDiagnostics(name, c.ID); err != nil {
+			fmt.Printf("[DEBUG] failed to print diagnostics for %s: %v\n", name, err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) printContainerDiagnostics(name, id string) error {
+	inspect, err := m.cli.ContainerInspect(m.ctx, id)
+	if err != nil {
+		return err
+	}
+
+	state := "unknown"
+	exitCode := -1
+	stateErr := ""
+	if inspect.State != nil {
+		state = inspect.State.Status
+		exitCode = inspect.State.ExitCode
+		stateErr = inspect.State.Error
+	}
+
+	fmt.Printf("[DEBUG] Container %s (%s): state=%s exitCode=%d error=%s\n", name, id[:12], state, exitCode, stateErr)
+
+	logs, logErr := m.getContainerLogs(id, 200)
+	if logErr != nil {
+		return fmt.Errorf("log fetch failed: %w", logErr)
+	}
+
+	if strings.TrimSpace(logs) == "" {
+		fmt.Printf("[DEBUG] %s recent logs: <none>\n", name)
+		return nil
+	}
+
+	fmt.Printf("[DEBUG] %s recent logs:\n%s\n", name, logs)
+	return nil
+}
+
+func (m *Manager) getContainerLogs(containerID string, tail int) (string, error) {
+	out, err := m.cli.ContainerLogs(m.ctx, containerID, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       fmt.Sprintf("%d", tail),
+	})
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	var stdout, stderr bytes.Buffer
+	_, err = stdcopy.StdCopy(&stdout, &stderr, out)
+	if err != nil {
+		return "", err
+	}
+
+	return stdout.String() + stderr.String(), nil
+}
+
+func (m *Manager) debugf(format string, args ...any) {
+	if !m.debug {
+		return
+	}
+	fmt.Printf("[DEBUG] "+format+"\n", args...)
 }

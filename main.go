@@ -61,6 +61,7 @@ func main() {
 	custom := flag.String("custom", "", "Path to custom queries.json (optional)")
 	cloneQueries := flag.Bool("clone-queries", true, "Clone SpecterOps Query Library")
 	pull := flag.Bool("pull", false, "Force pull images before starting")
+	debugFlag := flag.Bool("debug", false, "Enable verbose startup diagnostics and container logs")
 	ver := flag.Bool("v", false, "Show version")
 
 	// Add neo4j memory flag with 2G baseline (good default for AD imports)
@@ -103,7 +104,7 @@ func main() {
 
 	// Docker Manager
 	ctx := context.Background()
-	mgr, err := docker.NewManager(ctx)
+	mgr, err := docker.NewManager(ctx, *debugFlag)
 	if err != nil {
 		log.Fatalf("Failed to create docker client: %v", err)
 	}
@@ -322,6 +323,9 @@ func main() {
 	// Start Containers
 	psqlID, err := mgr.SpawnPostgres(*name, workingDir, netName)
 	if err != nil {
+		if *debugFlag {
+			_ = mgr.PrintProjectDiagnostics(*name)
+		}
 		// mgr.StopProjectContainers(*name) // Optional cleanup on fail
 		log.Fatalf("Failed to start Postgres: %v", err)
 	}
@@ -329,12 +333,18 @@ func main() {
 
 	neo4jID, err := mgr.SpawnNeo4j(*name, workingDir, netName, *neo4jHeap)
 	if err != nil {
+		if *debugFlag {
+			_ = mgr.PrintProjectDiagnostics(*name)
+		}
 		log.Fatalf("Failed to start Neo4j: %v", err)
 	}
 	fmt.Printf("Neo4j started (ID: %s) with heap size %s\n", neo4jID[:12], *neo4jHeap)
 
 	bhID, err := mgr.SpawnBloodhound(*name, netName, "admin", "admin")
 	if err != nil {
+		if *debugFlag {
+			_ = mgr.PrintProjectDiagnostics(*name)
+		}
 		log.Fatalf("Failed to start BloodHound: %v", err)
 	}
 	fmt.Printf("BloodHound started (ID: %s)\n", bhID[:12])
