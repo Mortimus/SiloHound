@@ -106,6 +106,7 @@ func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error)
 
 	config := &container.Config{
 		Image: POSTGRESQL,
+		User:  fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), // Run as host user
 		Env: []string{
 			"PGUSER=bloodhound",
 			"POSTGRES_USER=bloodhound",
@@ -121,7 +122,6 @@ func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error)
 				Target: "/var/lib/postgresql/data",
 			},
 		},
-		AutoRemove: true,
 	}
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
@@ -150,7 +150,6 @@ func (m *Manager) FixPermissions(hostPath string, uid, gid int) error {
 				Target: "/data",
 			},
 		},
-		AutoRemove: true,
 	}
 
 	resp, err := m.cli.ContainerCreate(m.ctx, config, hostConfig, nil, nil, "")
@@ -191,12 +190,13 @@ func (m *Manager) SpawnNeo4j(projectName, wd, netName, heapSize string) (string,
 
 	// Inject heap size if provided
 	if heapSize != "" {
-		env = append(env, fmt.Sprintf("NEO4J_dbms_memory_heap_initial__size=%s", heapSize))
-		env = append(env, fmt.Sprintf("NEO4J_dbms_memory_heap_max__size=%s", heapSize))
+		env = append(env, "NEO4J_dbms_memory_heap_initial__size=512M") // Start small
+		env = append(env, fmt.Sprintf("NEO4J_dbms_memory_heap_max__size=%s", heapSize)) // Grow later
 	}
 
 	config := &container.Config{
 		Image: NEO4J,
+		User:  fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), // Run as host user
 		Env:   env,
 		ExposedPorts: nat.PortSet{
 			"7474/tcp": struct{}{},
@@ -215,7 +215,6 @@ func (m *Manager) SpawnNeo4j(projectName, wd, netName, heapSize string) (string,
 			"7474/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7474"}},
 			"7687/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7687"}},
 		},
-		AutoRemove: true,
 	}
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
@@ -244,7 +243,6 @@ func (m *Manager) SpawnBloodhound(projectName, netName, adminName, adminPass str
 		PortBindings: nat.PortMap{
 			"8080/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "8181"}},
 		},
-		AutoRemove: true,
 	}
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
