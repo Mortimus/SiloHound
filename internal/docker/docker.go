@@ -22,7 +22,7 @@ import (
 
 const (
 	BLOODHOUND       = "docker.io/specterops/bloodhound:latest"
-	NEO4J            = "docker.io/library/neo4j:4.4"
+	NEO4J            = "docker.io/library/neo4j:latest"
 	POSTGRESQL       = "docker.io/library/postgres:16"
 	PSQLFOLDER       = "bloodhound-data/postgresql"
 	NEO4JFOLDER      = "bloodhound-data/neo4j"
@@ -181,7 +181,7 @@ func (m *Manager) SpawnNeo4j(projectName, wd, netName, heapSize string) (string,
 
 	env := []string{
 		"NEO4J_AUTH=neo4j/bloodhoundcommunityedition",
-		"NEO4J_labs_plugins=[\"apoc\"]",
+		"NEO4J_PLUGINS=[\"apoc\"]",
 		"NEO4J_apoc_export_file_enabled=true",
 		"NEO4J_apoc_import_file_enabled=true",
 		"NEO4J_apoc_import_file_use__neo4j__config=false",
