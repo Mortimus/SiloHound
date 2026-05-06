@@ -22,7 +22,7 @@ import (
 
 const (
 	BLOODHOUND       = "docker.io/specterops/bloodhound:latest"
-	NEO4J            = "docker.io/library/neo4j:latest"
+	NEO4J            = "docker.io/library/neo4j:4.4"
 	POSTGRESQL       = "docker.io/library/postgres:16"
 	PSQLFOLDER       = "bloodhound-data/postgresql"
 	NEO4JFOLDER      = "bloodhound-data/neo4j"
@@ -190,7 +190,7 @@ func (m *Manager) SpawnNeo4j(projectName, wd, netName, heapSize string) (string,
 
 	// Inject heap size if provided
 	if heapSize != "" {
-		env = append(env, "NEO4J_dbms_memory_heap_initial__size=512M") // Start small
+		env = append(env, "NEO4J_dbms_memory_heap_initial__size=512M")                  // Start small
 		env = append(env, fmt.Sprintf("NEO4J_dbms_memory_heap_max__size=%s", heapSize)) // Grow later
 	}
 
