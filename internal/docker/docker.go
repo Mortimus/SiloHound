@@ -106,7 +106,7 @@ func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error)
 
 	config := &container.Config{
 		Image: POSTGRESQL,
-		User:  fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), // Run as host user
+		User:  fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		Env: []string{
 			"PGUSER=bloodhound",
 			"POSTGRES_USER=bloodhound",
@@ -114,6 +114,7 @@ func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error)
 			"POSTGRES_DB=bloodhound",
 		},
 	}
+    
 	hostConfig := &container.HostConfig{
 		Mounts: []mount.Mount{
 			{
@@ -122,7 +123,12 @@ func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error)
 				Target: "/var/lib/postgresql/data",
 			},
 		},
+		// Inject an in-memory filesystem to bypass socket permission restrictions
+		Tmpfs: map[string]string{
+			"/var/run/postgresql": "rw,noexec,nosuid",
+		},
 	}
+    
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
 			netName: {Aliases: []string{"app-db"}},
