@@ -212,8 +212,8 @@ func (m *Manager) SpawnNeo4j(projectName, wd, netName, heapSize string) (string,
 			},
 		},
 		PortBindings: nat.PortMap{
-			"7474/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7474"}},
-			"7687/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7687"}},
+			"7474/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "7474"}},
+			"7687/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "7687"}},
 		},
 	}
 	networkingConfig := &network.NetworkingConfig{
@@ -241,7 +241,7 @@ func (m *Manager) SpawnBloodhound(projectName, netName, adminName, adminPass str
 	}
 	hostConfig := &container.HostConfig{
 		PortBindings: nat.PortMap{
-			"8080/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "8181"}},
+			"8080/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "8181"}},
 		},
 	}
 	networkingConfig := &network.NetworkingConfig{
