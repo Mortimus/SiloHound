@@ -101,12 +101,13 @@ func (m *Manager) ImageExists(imageName string) (bool, error) {
 }
 
 func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error) {
-	mountPath := filepath.Join(wd, PSQLFOLDER)
+	// Replaced the host path with a Docker Named Volume
+	volumeName := fmt.Sprintf("silohound_%s_pgdata", projectName)
 	containerName := fmt.Sprintf("SiloHound_%s_PSQL", projectName)
 
 	config := &container.Config{
 		Image: POSTGRESQL,
-		User:  fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+		// User override removed: Let the official image manage its own permissions
 		Env: []string{
 			"PGUSER=bloodhound",
 			"POSTGRES_USER=bloodhound",
@@ -114,21 +115,17 @@ func (m *Manager) SpawnPostgres(projectName, wd, netName string) (string, error)
 			"POSTGRES_DB=bloodhound",
 		},
 	}
-    
+
 	hostConfig := &container.HostConfig{
 		Mounts: []mount.Mount{
 			{
-				Type:   mount.TypeBind,
-				Source: mountPath,
+				Type:   mount.TypeVolume,
+				Source: volumeName,
 				Target: "/var/lib/postgresql/data",
 			},
 		},
-		// Inject an in-memory filesystem to bypass socket permission restrictions
-		Tmpfs: map[string]string{
-			"/var/run/postgresql": "rw,noexec,nosuid",
-		},
 	}
-    
+
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
 			netName: {Aliases: []string{"app-db"}},
@@ -218,8 +215,8 @@ func (m *Manager) SpawnNeo4j(projectName, wd, netName, heapSize string) (string,
 			},
 		},
 		PortBindings: nat.PortMap{
-			"7474/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "7474"}},
-			"7687/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "7687"}},
+			"7474/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7474"}},
+			"7687/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7687"}},
 		},
 	}
 	networkingConfig := &network.NetworkingConfig{
@@ -247,7 +244,7 @@ func (m *Manager) SpawnBloodhound(projectName, netName, adminName, adminPass str
 	}
 	hostConfig := &container.HostConfig{
 		PortBindings: nat.PortMap{
-			"8080/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "8181"}},
+			"8080/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "8181"}},
 		},
 	}
 	networkingConfig := &network.NetworkingConfig{
